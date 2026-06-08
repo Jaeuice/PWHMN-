@@ -1,0 +1,45 @@
+name: P1Harmony Ticket Monitor
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check availability
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+          MELON_COOKIES: ${{ secrets.MELON_COOKIES }}
+        run: |
+          echo "$RESPONSE" > /tmp/resp.txt
+          RESPONSE=$(curl -s \
+            'https://tkglobal.melon.com/tktapi/glb/product/schedule/gradelist.json?callback=check&v=1&prodId=213323&scheduleNo=100001&sellTypeCodeData=ST0002&langCd=EN&pocCode=SC0002' \
+            -H 'referer: https://tkglobal.melon.com/performance/index.htm?langCd=EN&prodId=213323' \
+            -H 'x-requested-with: XMLHttpRequest' \
+            -H 'user-agent: Mozilla/5.0' \
+            -b "$MELON_COOKIES")
+          echo "$RESPONSE" > /tmp/resp.txt
+          AVAIL=$(python3 << 'EOF'
+import json, re
+with open('/tmp/resp.txt') as f:
+    text = f.read()
+match = re.search(r'\((.+)\)', text, re.DOTALL)
+avail = 0
+if match:
+    try:
+        data = json.loads(match.group(1))
+        for grade in (data.get('data') or {}).get('seatGradelist') or []:
+            if grade.get('seatGradeNo') == '12568':
+                avail = int(grade.get('realSeatCntlk') or 0)
+    except: pass
+print(avail)
+EOF
+          )
+          echo "Available: $AVAIL"
+          if [ "$AVAIL" -gt "0" ]; then
+            curl -X POST "$SLACK_WEBHOOK" \
+              -H 'Content-type: application/json' \
+              -d "{\"text\": \"有票了！PANDEMONIUM ZONE ${AVAIL}席！快去抢P2/P6！\nhttps://tkglobal.melon.com/performance/index.htm?langCd=EN&prodId=213323\"}"
+          fi
