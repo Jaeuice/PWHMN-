@@ -8,22 +8,27 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Check availability
+      - name: Check availability every second
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
           MELON_COOKIES: ${{ secrets.MELON_COOKIES }}
         run: |
-          RESPONSE=$(curl -s \
-            'https://tkglobal.melon.com/tktapi/glb/product/schedule/gradelist.json?callback=check&v=1&prodId=213323&scheduleNo=100001&sellTypeCodeData=ST0002&langCd=EN&pocCode=SC0002' \
-            -H 'referer: https://tkglobal.melon.com/performance/index.htm?langCd=EN&prodId=213323' \
-            -H 'x-requested-with: XMLHttpRequest' \
-            -H 'user-agent: Mozilla/5.0' \
-            -b "$MELON_COOKIES")
-          echo "$RESPONSE" > /tmp/resp.txt
-          AVAIL=$(python3 -c "import json,re; text=open('/tmp/resp.txt').read(); match=re.search(r'\((.+)\)',text,re.DOTALL); data=json.loads(match.group(1)) if match else {}; grades=(data.get('data') or {}).get('seatGradelist') or []; avail=next((int(g.get('realSeatCntlk') or 0) for g in grades if g.get('seatGradeNo')=='12568'),0); print(avail)")
-          echo "Available: $AVAIL"
-          if [ "$AVAIL" -gt "0" ]; then
-            curl -X POST "$SLACK_WEBHOOK" \
-              -H 'Content-type: application/json' \
-              -d "{\"text\": \"有票了！PANDEMONIUM ZONE ${AVAIL}席！快去抢P2/P6！\nhttps://tkglobal.melon.com/performance/index.htm?langCd=EN&prodId=213323\"}"
-          fi
+          NOTIFIED=0
+          END=$((SECONDS + 280))
+          while [ $SECONDS -lt $END ]; do
+            RESPONSE=$(curl -s \
+              'https://tkglobal.melon.com/tktapi/glb/product/schedule/gradelist.json?callback=check&v=1&prodId=213323&scheduleNo=100001&sellTypeCodeData=ST0002&langCd=EN&pocCode=SC0002' \
+              -H 'referer: https://tkglobal.melon.com/performance/index.htm?langCd=EN&prodId=213323' \
+              -H 'x-requested-with: XMLHttpRequest' \
+              -H 'user-agent: Mozilla/5.0' \
+              -b "$MELON_COOKIES")
+            AVAIL=$(python3 -c "import json,re,sys; text='''$RESPONSE'''; match=re.search(r'\((.+)\)',text,re.DOTALL); data=json.loads(match.group(1)) if match else {}; grades=(data.get('data') or {}).get('seatGradelist') or []; avail=next((int(g.get('realSeatCntlk') or 0) for g in grades if g.get('seatGradeNo')=='12568'),0); print(avail)" 2>/dev/null || echo 0)
+            echo "$(date '+%H:%M:%S') Available: $AVAIL"
+            if [ "$AVAIL" -gt "0" ] && [ "$NOTIFIED" -eq "0" ]; then
+              curl -X POST "$SLACK_WEBHOOK" \
+                -H 'Content-type: application/json' \
+                -d "{\"text\": \"有票了！PANDEMONIUM ZONE ${AVAIL}席！快去抢P2/P6！\nhttps://tkglobal.melon.com/performance/index.htm?langCd=EN&prodId=213323\"}"
+              NOTIFIED=1
+            fi
+            sleep 1
+          done
